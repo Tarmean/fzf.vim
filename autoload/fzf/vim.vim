@@ -1318,6 +1318,111 @@ function! fzf#vim#complete(...)
   return ''
 endfunction
 
+function! fzf#vim#session(...)
+        let [query, args] = (a:0 && type(a:1) == type('')) ? [a:1, a:000[1:]] : ['', a:000]
+        return s:fzf('load_session', {
+        \    'source':  s:session_source(query) + [s:new_session_prompt],
+        \   'sink*':   s:function('s:session_sink'),
+        \   'options': ['+m', '--tiebreak=index', '--prompt', 'Load Session> ', '--ansi', '--extended', '--nth=2..', '--layout=reverse-list', '--tabstop=1'],
+        \}, args)
+endfunction
+let s:new_session_prompt = '      New Session'
+let g:session_dir = expand('~/.vim/sessions/')
+
+
+function! fzf#vim#delete_session(...)
+        let [query, args] = (a:0 && type(a:1) == type('')) ? [a:1, a:000[1:]] : ['', a:000]
+        return s:fzf('delete_session', {
+        \   'source':  s:session_source(query),
+        \   'sink*':   s:function('s:delete_session_sink'),
+        \   'options': ['+m', '--tiebreak=index', '--multi', '--prompt', 'Delete Session> ', '--ansi', '--extended', '--nth=2..', '--layout=reverse-list', '--tabstop=1'],
+        \}, args)
+endfunction
+
+
+function! s:format_session_line(idx, str)
+    let mod_time = s:rel_time(getftime(a:str))
+    let name = fnamemodify(a:str, ':t:r')
+    let fmt_str = s:yellow("%s\t%2d ", "LineNr") . printf("\t%%-%ds%%s", min([80, winwidth('')-12]) - len(mod_time))
+    let cur_session = get(g:, 'this_obsession', v:this_session)
+    return printf(fmt_str,a:str == cur_session ? '*' : ' ', a:idx+1, name, mod_time)
+endfunction
+function! s:rel_time(time)
+    let t = localtime() - a:time
+    let orders = [[60, 'Second'], [60, 'Minute'], [24, 'Hour'], [7, 'Day'], [4, 'Week'], [12, 'Month'], [0, 'Year']]
+    for [fits, name] in orders
+        let cur_format = printf("%d %s%s Ago", t, name, t == 1 ? '' : 's')
+        if t < fits
+            break
+        endif
+        let t = t / fits
+    endfor
+    return cur_format
+endfunction
+
+
+function! s:session_sink(lines)
+  if len(a:lines) < 2
+    return
+  endif
+  let qfl = []
+  for line in a:lines[1:]
+      if line == s:new_session_prompt
+          let session_name =  input('Session Name: ')
+          if (empty(session_name))
+              return
+          endif
+          let session_name = g:session_dir . '/' . session_name. '.vim'
+      else
+          let session_idx = str2nr(split(line, "\t", 1)[1])
+          let session_name = s:session_paths[session_idx-1]
+      endif
+      let cur_session = get(g:, 'this_obsession', v:this_session)
+      if (!empty(cur_session))
+          Obsession
+      endif
+      if (session_name != cur_session)
+          if filereadable(session_name)
+              let mod = map(getbufinfo(), 'v:val.changed')
+              if len(filter(mod, 'v:val')) != 0
+                  echo 'Warning: Unsaved buffers'
+                  return
+              endif
+              bufdo bd
+              exec "source " . session_name
+          else
+          endif
+      endif
+      exec 'Obsession  ' . session_name
+  endfor
+endfunction
+
+function! s:session_source(patt)
+    let cur_session = get(g:, 'this_obsession', v:this_session)
+    let s:session_paths = split(globpath(g:session_dir, '*.vim'), '\n')
+    let paths = split(globpath(g:session_dir, '*.vim'), '\n')
+    let formatted = map(paths, 's:format_session_line(v:key, v:val)')
+    return formatted
+endfunction
+
+function! s:delete_session_sink(lines)
+      if len(a:lines) < 2
+        return
+      endif
+      let qfl = []
+      let cur_session = get(g:, 'this_obsession', v:this_session)
+      for line in a:lines[1:]
+          let session_idx = str2nr(split(line, "\t", 1)[1])
+          let cur_path = s:session_paths[session_idx-1]
+          if cur_session == cur_path
+              Obsession!
+          else
+              call delete(fnameescape(cur_path))
+              echo "Deleted session in " . cur_path
+          endif
+      endfor
+endfunction
+
 " ------------------------------------------------------------------
 let &cpo = s:cpo_save
 unlet s:cpo_save
